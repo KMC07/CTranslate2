@@ -233,6 +233,8 @@ namespace ctranslate2 {
       decoding_options.return_prefix = false;
       decoding_options.include_eos_in_scores = options.beam_size > 1;
       decoding_options.include_eos_in_hypotheses = false;
+      decoding_options.return_attention = options.return_attention;
+      decoding_options.return_prefix = false;
       for (const auto& id : _model->config["suppress_ids"])
         decoding_options.disable_ids.push_back(id);
       for (const auto& id : _model->config["suppress_ids_begin"])
