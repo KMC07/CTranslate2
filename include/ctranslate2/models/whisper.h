@@ -42,6 +42,9 @@ namespace ctranslate2 {
       // Include scores in the result.
       bool return_scores = false;
 
+      // Include scores in the result.
+      bool return_attention = false;
+
       // Include the probability of the no speech token in the result.
       bool return_no_speech_prob = false;
     };
@@ -51,6 +54,7 @@ namespace ctranslate2 {
       std::vector<std::vector<size_t>> sequences_ids;
       std::vector<float> scores;
       float no_speech_prob = 0;
+      std::vector<std::vector<std::vector<float>>> attention;
 
       size_t num_sequences() const {
         return sequences.size();
@@ -58,6 +62,10 @@ namespace ctranslate2 {
 
       bool has_scores() const {
         return !scores.empty();
+      }
+
+      bool has_attention() const {
+        return !attention.empty();
       }
     };
 

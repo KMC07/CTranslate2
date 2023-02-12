@@ -25,6 +25,7 @@ namespace ctranslate2 {
                size_t no_repeat_ngram_size,
                size_t max_length,
                bool return_scores,
+               bool return_attention,
                bool return_no_speech_prob,
                size_t sampling_topk,
                float sampling_temperature) {
@@ -41,6 +42,7 @@ namespace ctranslate2 {
         options.max_length = max_length;
         options.num_hypotheses = num_hypotheses;
         options.return_scores = return_scores;
+        options.return_attention = return_attention;
         options.return_no_speech_prob = return_no_speech_prob;
 
         if (prompts.index() == 0)
@@ -76,12 +78,15 @@ namespace ctranslate2 {
                       "Score of each sequence (empty if :obj:`return_scores` was disabled).")
         .def_readonly("no_speech_prob", &models::WhisperGenerationResult::no_speech_prob,
                       "Probability of the no speech token (0 if :obj:`return_no_speech_prob` was disabled).")
+        .def_readonly("attention", &models::WhisperGenerationResult::no_speech_prob,
+                      "The attention alignment of the model (empty if :obj:`return_attention` was disabled).")
 
         .def("__repr__", [](const models::WhisperGenerationResult& result) {
           return "WhisperGenerationResult(sequences=" + std::string(py::repr(py::cast(result.sequences)))
             + ", sequences_ids=" + std::string(py::repr(py::cast(result.sequences_ids)))
             + ", scores=" + std::string(py::repr(py::cast(result.scores)))
             + ", no_speech_prob=" + std::string(py::repr(py::cast(result.no_speech_prob)))
+            + ", attention=" + std::string(py::repr(py::cast(result.attention)))
             + ")";
         })
         ;
@@ -140,6 +145,7 @@ namespace ctranslate2 {
              py::arg("no_repeat_ngram_size")=0,
              py::arg("max_length")=448,
              py::arg("return_scores")=false,
+             py::arg("return_attention")=false,
              py::arg("return_no_speech_prob")=false,
              py::arg("sampling_topk")=1,
              py::arg("sampling_temperature")=1,
@@ -164,6 +170,7 @@ namespace ctranslate2 {
                      (set 0 to disable).
                    max_length: Maximum generation length.
                    return_scores: Include the scores in the output.
+                   return_attention: Include the attention alignment in the output.
                    return_no_speech_prob: Include the probability of the no speech token in the
                      result.
                    sampling_topk: Randomly sample predictions from the top K candidates.
