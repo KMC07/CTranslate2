@@ -78,7 +78,7 @@ namespace ctranslate2 {
                       "Score of each sequence (empty if :obj:`return_scores` was disabled).")
         .def_readonly("no_speech_prob", &models::WhisperGenerationResult::no_speech_prob,
                       "Probability of the no speech token (0 if :obj:`return_no_speech_prob` was disabled).")
-        .def_readonly("attention", &models::WhisperGenerationResult::no_speech_prob,
+        .def_readonly("attention", &models::WhisperGenerationResult::attention,
                       "The attention alignment of the model (empty if :obj:`return_attention` was disabled).")
 
         .def("__repr__", [](const models::WhisperGenerationResult& result) {
