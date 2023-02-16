@@ -76,6 +76,8 @@ namespace ctranslate2 {
                       "Generated sequences of token IDs.")
         .def_readonly("scores", &models::WhisperGenerationResult::scores,
                       "Score of each sequence (empty if :obj:`return_scores` was disabled).")
+        .def_readonly("token_scores", &models::WhisperGenerationResult::token_scores,
+                      "Score of each token in a sequence (empty if :obj:`return_scores` was disabled).")
         .def_readonly("no_speech_prob", &models::WhisperGenerationResult::no_speech_prob,
                       "Probability of the no speech token (0 if :obj:`return_no_speech_prob` was disabled).")
         .def_readonly("attention", &models::WhisperGenerationResult::attention,
@@ -85,6 +87,7 @@ namespace ctranslate2 {
           return "WhisperGenerationResult(sequences=" + std::string(py::repr(py::cast(result.sequences)))
             + ", sequences_ids=" + std::string(py::repr(py::cast(result.sequences_ids)))
             + ", scores=" + std::string(py::repr(py::cast(result.scores)))
+            + ", token_scores=" + std::string(py::repr(py::cast(result.token_scores)))
             + ", no_speech_prob=" + std::string(py::repr(py::cast(result.no_speech_prob)))
             + ", attention=" + std::string(py::repr(py::cast(result.attention)))
             + ")";

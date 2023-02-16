@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <memory>
 #include <numeric>
 
@@ -229,10 +230,14 @@ namespace ctranslate2 {
 
     result.hypotheses = index_vector(result.hypotheses, idx);
 
-    if (keep_scores)
+    if (keep_scores){
       result.scores = index_vector(result.scores, idx);
-    else
+      result.token_scores = index_vector(result.token_scores, idx);
+    }
+    else{
       result.scores.clear();
+      result.token_scores.clear();
+    }
 
     if (keep_attention)
       result.attention = index_vector(result.attention, idx);
@@ -569,6 +574,7 @@ namespace ctranslate2 {
             // Register this hypothesis.
             const StorageView& scores = ignore_last_score ? topk_scores_prev : topk_scores;
             result.scores.emplace_back(scores.scalar_at<float>({i, k}));
+            result.token_scores.emplace_back(scores);
             result.hypotheses.emplace_back(build_hypothesis(alive_seq, i, k, ignore_last_token));
             if (alive_attention)
               result.attention.emplace_back(build_attention(alive_attention, i, k, ignore_last_token));
@@ -726,6 +732,7 @@ namespace ctranslate2 {
 
         final_result.hypotheses.emplace_back(std::move(result.hypotheses[0]));
         final_result.scores.emplace_back(result.scores[0]);
+        final_result.token_scores.emplace_back(std::move(result.token_scores[0]));
         if (return_attention)
           final_result.attention.emplace_back(std::move(result.attention[0]));
       }
@@ -750,8 +757,10 @@ namespace ctranslate2 {
       batch_offset[i] = i;
       sample_from.at<int32_t>(i) = start_ids[i];
       results[i].hypotheses.resize(1);
-      if (return_scores)
+      if (return_scores){
         results[i].scores.resize(1, 0.f);
+        results[i].token_scores.resize(1);
+      }
       if (return_attention)
         results[i].attention.resize(1);
     }
@@ -820,8 +829,10 @@ namespace ctranslate2 {
         }
 
         if (word_id != end_id || include_eos_in_scores) {
-          if (return_scores)
+          if (return_scores){
             results[batch_id].scores[0] += best_probs.scalar_at<float>({i, 0});
+            results[batch_id].token_scores[0].push_back(best_probs.scalar_at<float>({i, 0}));
+          }
         }
 
         const bool is_finished = ((word_id == end_id && step >= prefix_length)
@@ -993,8 +1004,10 @@ namespace ctranslate2 {
                       const DecodingOptions& options) {
     DecodingResult result;
     result.hypotheses.resize(options.num_hypotheses);
-    if (options.return_scores)
+    if (options.return_scores){
       result.scores.resize(options.num_hypotheses, 0);
+      result.token_scores.resize(options.num_hypotheses);
+    }
     if (options.return_attention)
       result.attention.resize(options.num_hypotheses);
 
@@ -1075,8 +1088,11 @@ namespace ctranslate2 {
       result.hypotheses[i].emplace_back(expansion_result.hypotheses[i].back());
       if (options.return_attention)
         result.attention[i].emplace_back(std::move(expansion_result.attention[i].back()));
-      if (options.return_scores)
+      if (options.return_scores){
         result.scores[i] = expansion_result.scores[i];
+        result.token_scores[i].emplace_back(expansion_result.token_scores[i].back());
+      }
+
 
       // The next input is the words we just expanded.
       start_ids.push_back(result.hypotheses[i].back());
@@ -1089,8 +1105,10 @@ namespace ctranslate2 {
         pair.second.resize(0, num_alternatives);
 
       result.hypotheses.resize(num_alternatives);
-      if (options.return_scores)
+      if (options.return_scores){
         result.scores.resize(num_alternatives);
+        result.token_scores.resize(num_alternatives);
+      }
       if (options.return_attention)
         result.attention.resize(num_alternatives);
     }
@@ -1123,6 +1141,9 @@ namespace ctranslate2 {
 
       if (options.return_scores) {
         result.scores[i] += suffix.scores[0];
+        result.token_scores[i].insert(result.token_scores[i].end(),
+                                  std::make_move_iterator(suffix.token_scores[0].begin()),
+                                  std::make_move_iterator(suffix.token_scores[0].end()));
       }
 
       if (options.return_attention)

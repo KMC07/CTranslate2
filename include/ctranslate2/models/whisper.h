@@ -53,6 +53,7 @@ namespace ctranslate2 {
       std::vector<std::vector<std::string>> sequences;
       std::vector<std::vector<size_t>> sequences_ids;
       std::vector<float> scores;
+      std::vector<float> token_scores;
       float no_speech_prob = 0;
       std::vector<std::vector<std::vector<float>>> attention;
 
@@ -62,6 +63,10 @@ namespace ctranslate2 {
 
       bool has_scores() const {
         return !scores.empty();
+      }
+
+      bool has_token_scores() const {
+        return !token_scores.empty();
       }
 
       bool has_attention() const {

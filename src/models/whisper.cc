@@ -1,6 +1,7 @@
 #include "ctranslate2/models/whisper.h"
 
 #include <algorithm>
+#include <iostream>
 
 #include "ctranslate2/decoding.h"
 #include "ctranslate2/models/model_factory.h"
@@ -230,11 +231,8 @@ namespace ctranslate2 {
       decoding_options.num_hypotheses = options.num_hypotheses;
       decoding_options.return_scores = options.return_scores;
       decoding_options.return_attention = options.return_attention;
-      decoding_options.return_prefix = false;
       decoding_options.include_eos_in_scores = options.beam_size > 1;
       decoding_options.include_eos_in_hypotheses = false;
-      decoding_options.return_attention = options.return_attention;
-      decoding_options.return_prefix = false;
       for (const auto& id : _model->config["suppress_ids"])
         decoding_options.disable_ids.push_back(id);
       for (const auto& id : _model->config["suppress_ids_begin"])
@@ -260,6 +258,7 @@ namespace ctranslate2 {
         final_result.sequences = vocabulary.to_tokens(result.hypotheses);
         final_result.sequences_ids = std::move(result.hypotheses);
         final_result.scores = std::move(result.scores);
+        final_result.token_scores = std::move(result.token_scores[0]);
         final_result.attention = std::move(result.attention);
         if (options.return_no_speech_prob)
           final_result.no_speech_prob = no_speech_probs[i];

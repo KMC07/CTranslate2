@@ -11,6 +11,7 @@ namespace ctranslate2 {
   struct DecodingResult {
     std::vector<std::vector<size_t>> hypotheses;
     std::vector<float> scores;
+    std::vector<std::vector<float>> token_scores;
     std::vector<std::vector<std::vector<float>>> attention;
   };
 
