@@ -1,6 +1,7 @@
 #include "ctranslate2/layers/transformer.h"
 
 #include <cmath>
+#include <iostream>
 
 namespace ctranslate2 {
   namespace layers {
@@ -300,6 +301,29 @@ namespace ctranslate2 {
       return decode(ids, &lengths, -1, state, &logits);
     }
 
+    static void append_attention_layer(StorageView& layers,
+                                       StorageView& layer) {
+    
+    StorageView new_layer;
+    std::cout << "create new layer" << std::endl;
+    const dim_t num_heads = layer.dim(1);
+    std::cout << "num_heads" << num_heads << std::endl;
+    new_layer.copy_from(layer);
+    std::cout << "copy from" << std::endl;
+    new_layer.expand_dims(1);  // Insert new dimension for the layers.
+    std::cout << "expand dimension" << std::endl;
+
+    if (layers) {
+      const StorageView cur_layers(std::move(layers));
+      std::cout << "create cur_layers" << std::endl;
+      ops::Concat(1)({&cur_layers, &new_layer}, layers);
+      std::cout << "concat layers" << std::endl;
+    } else {
+      layers = std::move(new_layer);
+      std::cout << "just move new_layer since layers doesn't exist" << std::endl;
+    }
+  }
+
     void TransformerDecoder::decode(const StorageView& ids,
                                     const StorageView* lengths,
                                     dim_t step,
@@ -384,6 +408,7 @@ namespace ctranslate2 {
         }
       }
 
+      StorageView attention_layers;
       for (size_t l = 0; l < _layers.size(); ++l) {
         StorageView* cached_self_attn_keys = nullptr;
         StorageView* cached_self_attn_values = nullptr;
@@ -409,10 +434,15 @@ namespace ctranslate2 {
                       cached_attn_keys,
                       cached_attn_values,
                       layer_out,
-                      l == size_t(_alignment_layer) ? attention : nullptr,
+                      attention,
                       input_padder.get(),
                       memory_padder.get());
         layer_in = std::move(layer_out);
+        //l == size_t(_alignment_layer) ? attention : nullptr,
+        if(attention){
+          std::cout << "layer " << l << std::endl;
+          append_attention_layer(attention_layers, *attention);
+        }
       }
 
       if (step == 0) {
@@ -421,6 +451,8 @@ namespace ctranslate2 {
       }
 
       if (attention) {
+        std::cout << "attention_layers " << attention_layers.shape() << std::endl;
+        std::cout << "attention_layer " << attention->shape() << std::endl;
         *attention = reduce_multi_head_attention(*attention, _alignment_heads);
         if (!is_sequence)
           attention->squeeze(1);
