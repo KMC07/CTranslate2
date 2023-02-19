@@ -133,6 +133,15 @@ namespace ctranslate2 {
     const auto* ids = history.index<int32_t>({batch, beam, 0});
     return std::vector<size_t>(ids, ids + length);
   }
+  
+  static std::vector<float> build_topk_scores(const StorageView& history,
+                                              const dim_t batch,
+                                              const dim_t beam,
+                                              const bool ignore_last) {
+    const auto length = history.dim(-1) - dim_t(ignore_last);
+    const auto* ids = history.index<float>({batch, beam, 0});
+    return std::vector<float>(ids, ids + length);
+    }
 
   static std::vector<std::vector<float>> build_attention(const StorageView& history,
                                                          const dim_t batch,
@@ -409,6 +418,10 @@ namespace ctranslate2 {
 
     StorageView logits(dtype, device);
     StorageView alive_seq(topk_ids.dtype());
+    // Store the actual token score
+    StorageView alive_seq_scores(topk_scores.dtype());
+    // Keep track of the previous token score to prevent accumulated token scores
+    StorageView alive_seq_scores_prev;
     StorageView alive_attention;
 
     for (dim_t step = 0; step < max_length; ++step) {
@@ -434,10 +447,14 @@ namespace ctranslate2 {
       if (!logits_processors.empty()) {
         if (alive_seq)
           merge_batch_beam(alive_seq);
+        if (alive_seq_scores)
+          merge_batch_beam(alive_seq_scores);
         for (const auto& logits_processor : logits_processors)
           logits_processor->apply(step, logits, disable_tokens, alive_seq, batch_offset, prefix_ids);
         if (alive_seq)
           split_batch_beam(alive_seq, _beam_size);
+        if (alive_seq_scores)
+          split_batch_beam(alive_seq_scores, _beam_size);
       }
 
       disable_tokens.apply();
@@ -502,6 +519,27 @@ namespace ctranslate2 {
       // Append last prediction.
       append_step_output(alive_seq, topk_ids, &gather_indices);
 
+      if(step == 0)
+        // No accumulated scores since its the first step
+        // Append last topk_scores
+        append_step_output(alive_seq_scores, topk_scores, &gather_indices);
+      else{
+        // Convert the storage views into vectors
+        std::vector<float> topk_scores_vec = topk_scores.to_vector<float>();
+        std::vector<float> alive_seq_scores_prev_vec = alive_seq_scores_prev.to_vector<float>();
+        std::vector<float> actual_topk_scores_vec(topk_scores_vec.size());
+
+        // Calculate the adjancent difference to get the actual score topk_scores instead of accumulated scores
+        std::transform(topk_scores_vec.begin(), topk_scores_vec.end(), alive_seq_scores_prev_vec.begin(), actual_topk_scores_vec.begin(), std::minus<float>());
+
+        // Append last non accumulated topk_scores
+        StorageView actual_topk_scores(topk_scores.shape(), actual_topk_scores_vec);
+        append_step_output(alive_seq_scores, actual_topk_scores, &gather_indices);
+      }
+
+      // Keep track of the previous score so we can calculate the adjacent different
+      alive_seq_scores_prev = topk_scores;
+
       if (attention_step) {
         if (!is_expanded)
           repeat_batch(attention_step, _beam_size);
@@ -541,7 +579,8 @@ namespace ctranslate2 {
             // Register this hypothesis.
             const StorageView& scores = ignore_last_score ? topk_scores_prev : topk_scores;
             result.scores.emplace_back(scores.scalar_at<float>({i, k}));
-            result.token_scores.emplace_back(scores);
+            // add the token scores
+            result.token_scores.emplace_back(build_topk_scores(alive_seq_scores, i, k, ignore_last_token));
             result.hypotheses.emplace_back(build_hypothesis(alive_seq, i, k, ignore_last_token));
             if (alive_attention)
               result.attention.emplace_back(build_attention(alive_attention, i, k, ignore_last_token));
@@ -595,6 +634,7 @@ namespace ctranslate2 {
       gather_beam_flat(topk_ids, active_beams, _beam_size);
       gather_beam_flat(topk_scores, active_beams, _beam_size);
       gather_beam_flat(alive_seq, active_beams, _beam_size);
+      gather_beam_flat(alive_seq_scores, active_beams, _beam_size);
       if (alive_attention)
         gather_beam_flat(alive_attention, active_beams, _beam_size);
 
@@ -610,6 +650,7 @@ namespace ctranslate2 {
         gather(topk_ids, *keep_batches);
         gather(topk_scores, *keep_batches);
         gather(alive_seq, *keep_batches);
+        gather(alive_seq_scores, *keep_batches);
         if (alive_attention)
           gather(alive_attention, *keep_batches);
         if (keep_batches->device() != device)
