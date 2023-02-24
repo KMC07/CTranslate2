@@ -10,7 +10,7 @@
 #include "dispatch.h"
 
 namespace ctranslate2 {
-
+  
   static const ops::Gather gather;
 
   static void gather_beam_flat(StorageView& data, const StorageView& indices, dim_t beam_size) {
@@ -162,6 +162,43 @@ namespace ctranslate2 {
     return attention;
   }
 
+  static std::vector<std::vector<std::vector<std::vector<float>>>> build_full_attention(const StorageView& history,
+                                                         const dim_t batch,
+                                                         const dim_t beam,
+                                                         const bool ignore_last) {
+    if (!history)
+      return {};
+
+    const auto dim1 = history.dim(-3);
+    const auto dim2 = history.dim(-2);
+    const auto dim3 = history.dim(-1);
+    const auto target_length = history.dim(-4) - dim_t(ignore_last);
+
+    std::vector<std::vector<std::vector<std::vector<float>>>> full_attention;
+    full_attention.reserve(target_length);
+    for (dim_t t = 0; t < target_length; ++t) {
+      const auto* vector = history.index<float>({batch, beam, t, 0, 0, 0});
+      std::vector<float> attn_vec(vector, vector + (dim1 * dim2 * dim3));
+      std::vector<std::vector<std::vector<float>>> new_element;
+      new_element.reserve(dim1);
+      for (int i = 0; i < dim1; ++i) {
+        std::vector<std::vector<float>> new_row;
+        new_row.reserve(dim2);
+        for (int j = 0; j < dim2; ++j) {
+          std::vector<float> new_col;
+          new_col.reserve(dim3);
+          for (int k = 0; k < dim3; ++k) {
+            new_col.emplace_back(attn_vec[i*dim2*dim3 + j*dim3 + k]);
+          }
+          new_row.emplace_back(std::move(new_col));
+        }
+        new_element.emplace_back(std::move(new_row));
+      }
+      full_attention.emplace_back(std::move(new_element));
+    }
+    return full_attention;
+  }
+
   static float compute_coverage_penalty(const std::vector<std::vector<float>>& attention,
                                         const float beta) {
     float penalty = 0;
@@ -216,9 +253,14 @@ namespace ctranslate2 {
     }
 
     if (keep_attention)
+    {
       result.attention = index_vector(result.attention, idx);
-    else
+      result.full_attention = index_vector(result.full_attention, idx);
+    } 
+    else{
       result.attention.clear();
+      result.full_attention.clear();
+    }
   }
 
   static inline void finalize_result(DecodingResult& result,
@@ -423,18 +465,21 @@ namespace ctranslate2 {
     // Keep track of the previous token score to prevent accumulated token scores
     StorageView alive_seq_scores_prev;
     StorageView alive_attention;
+    StorageView full_alive_attention;
 
     for (dim_t step = 0; step < max_length; ++step) {
       const bool is_expanded = (!expand_after_first_step || step > 0);
 
       // Compute log probs for the current step.
       StorageView attention_step(dtype, device);
+      StorageView full_attention_step(dtype, device);
       convert_to_original_word_ids(decoder, topk_ids);
       decoder(start_step + step,
               topk_ids.to(device),
               state,
               &logits,  // output shape: (cur_batch_size*beam_size x vocab_size), if not expanded beam_size is 1
-              (return_attention || _coverage_penalty != 0) ? &attention_step : nullptr);
+              (return_attention || _coverage_penalty != 0) ? &attention_step : nullptr,
+              (return_attention || _coverage_penalty != 0) ? &full_attention_step : nullptr);
 
       const dim_t cur_batch_size = is_expanded ? logits.dim(0) / _beam_size : logits.dim(0);
 
@@ -525,15 +570,10 @@ namespace ctranslate2 {
         append_step_output(alive_seq_scores, topk_scores, &gather_indices);
       else{
         // Convert the storage views into vectors
-        std::vector<float> topk_scores_vec = topk_scores.to_vector<float>();
-        std::vector<float> alive_seq_scores_prev_vec = alive_seq_scores_prev.to_vector<float>();
-        std::vector<float> actual_topk_scores_vec(topk_scores_vec.size());
-
-        // Calculate the adjancent difference to get the actual score topk_scores instead of accumulated scores
-        std::transform(topk_scores_vec.begin(), topk_scores_vec.end(), alive_seq_scores_prev_vec.begin(), actual_topk_scores_vec.begin(), std::minus<float>());
+        StorageView actual_topk_scores;
+        ops::Sub()(topk_scores, alive_seq_scores_prev, actual_topk_scores);
 
         // Append last non accumulated topk_scores
-        StorageView actual_topk_scores(topk_scores.shape(), actual_topk_scores_vec);
         append_step_output(alive_seq_scores, actual_topk_scores, &gather_indices);
       }
 
@@ -546,6 +586,14 @@ namespace ctranslate2 {
         split_batch_beam(attention_step, _beam_size);
         append_step_output(alive_attention, attention_step.to_float().to(Device::CPU));
         gather_beam_flat(alive_attention, gather_indices, num_candidates);
+      }
+
+      if (full_attention_step) {
+        if (!is_expanded)
+          repeat_batch(full_attention_step, _beam_size);
+        split_batch_beam(full_attention_step, _beam_size);
+        append_step_output(full_alive_attention, full_attention_step.to_float().to(Device::CPU));
+        gather_beam_flat(full_alive_attention, gather_indices, num_candidates);
       }
 
       // Check if some hypotheses are finished.
@@ -584,7 +632,8 @@ namespace ctranslate2 {
             result.hypotheses.emplace_back(build_hypothesis(alive_seq, i, k, ignore_last_token));
             if (alive_attention)
               result.attention.emplace_back(build_attention(alive_attention, i, k, ignore_last_token));
-
+            if (full_alive_attention)
+              result.full_attention.emplace_back(build_full_attention(full_alive_attention, i, k, ignore_last_token));
             // Move another active beam to this position.
             for (dim_t j = secondary_candidates_offset; j < num_candidates; ++j) {
               const auto candidate = topk_ids.at<int32_t>({i, j});
@@ -637,6 +686,8 @@ namespace ctranslate2 {
       gather_beam_flat(alive_seq_scores, active_beams, _beam_size);
       if (alive_attention)
         gather_beam_flat(alive_attention, active_beams, _beam_size);
+      if (full_alive_attention)
+        gather_beam_flat(full_alive_attention, active_beams, _beam_size);
 
       // If some sentences finished on this step, ignore them for the next step.
       std::unique_ptr<StorageView> keep_batches;
@@ -653,6 +704,8 @@ namespace ctranslate2 {
         gather(alive_seq_scores, *keep_batches);
         if (alive_attention)
           gather(alive_attention, *keep_batches);
+        if (full_alive_attention)
+          gather(full_alive_attention, *keep_batches);
         if (keep_batches->device() != device)
           *keep_batches = keep_batches->to(device);
       }
@@ -734,8 +787,10 @@ namespace ctranslate2 {
         final_result.hypotheses.emplace_back(std::move(result.hypotheses[0]));
         final_result.scores.emplace_back(result.scores[0]);
         final_result.token_scores.emplace_back(std::move(result.token_scores[0]));
-        if (return_attention)
+        if (return_attention){
           final_result.attention.emplace_back(std::move(result.attention[0]));
+          final_result.full_attention.emplace_back(std::move(result.full_attention[0]));
+        }
       }
 
       for (auto& result : final_results)
@@ -762,23 +817,28 @@ namespace ctranslate2 {
         results[i].scores.resize(1, 0.f);
         results[i].token_scores.resize(1);
       }
-      if (return_attention)
+      if (return_attention){
         results[i].attention.resize(1);
+        results[i].full_attention.resize(1);
+      }
+        
     }
 
     StorageView best_ids(DataType::INT32);
     StorageView best_probs(dtype);
-    StorageView alive_seq(DataType::INT32);
     StorageView attention_step;
     StorageView attention_step_device(dtype, device);
-
+    StorageView alive_seq(DataType::INT32);
+    StorageView full_attention_step;
+    StorageView full_attention_step_device(dtype, device);
     for (dim_t step = 0; step < max_length; ++step) {
       convert_to_original_word_ids(decoder, sample_from);
       decoder(start_step + step,
               sample_from.to(device),
               state,
               &logits,
-              gather_attention ? &attention_step_device : nullptr);
+              gather_attention ? &attention_step_device : nullptr,
+              gather_attention ? &full_attention_step_device : nullptr);
 
       DisableTokens disable_tokens(logits);
 
@@ -802,6 +862,8 @@ namespace ctranslate2 {
         update_sample_with_prefix(step, best_ids, best_probs, *prefix_ids, end_id, batch_offset);
       if (attention_step_device)
         attention_step.copy_from(attention_step_device.to_float());
+      if (full_attention_step_device)
+        full_attention_step.copy_from(full_attention_step_device.to_float());
 
       if (!logits_processors.empty()) {
         if (alive_seq) {
@@ -826,6 +888,29 @@ namespace ctranslate2 {
           if (attention_step) {
             const auto* attn = attention_step.index<float>({i, 0});
             results[batch_id].attention[0].emplace_back(attn, attn + attention_step.dim(-1));
+          }
+          if (full_attention_step) {
+            const auto* full_attn = full_attention_step.index<float>({i, 0, 0, 0});
+            const int dim1 = full_attention_step.dim(-3);
+            const int dim2 = full_attention_step.dim(-2);
+            const int dim3 = full_attention_step.dim(-1);
+            std::vector<float> attn_vec(full_attn, full_attn + (dim1 * dim2 * dim3));
+            std::vector<std::vector<std::vector<float>>> new_element;
+            new_element.reserve(dim1);
+            for (int j = 0; j < dim1; ++j) {
+              std::vector<std::vector<float>> new_row;
+              new_row.reserve(dim2);
+              for (int k = 0; k < dim2; ++k) {
+                std::vector<float> new_col;
+                new_col.reserve(dim3);
+                for (int l = 0; l < dim3; ++l) {
+                  new_col.emplace_back(attn_vec[j*dim2*dim3 + k*dim3 + l]);
+                }
+                new_row.emplace_back(std::move(new_col));
+              }
+              new_element.emplace_back(std::move(new_row));
+            }
+            results[batch_id].full_attention[0].emplace_back(std::move(new_element));
           }
         }
 
@@ -1015,8 +1100,10 @@ namespace ctranslate2 {
       result.scores.resize(options.num_hypotheses, 0);
       result.token_scores.resize(options.num_hypotheses);
     }
-    if (options.return_attention)
+    if (options.return_attention){
       result.attention.resize(options.num_hypotheses);
+      result.full_attention.resize(options.num_hypotheses);
+    }
 
     if (start_tokens.empty())
       throw std::invalid_argument("One input has no decoder start token");
@@ -1032,6 +1119,7 @@ namespace ctranslate2 {
       // Initialize the decoder state with the prefix.
       const Device device = decoder.device();
       StorageView attention(decoder.output_type(), device);
+      StorageView full_attention(decoder.output_type(), device);
       StorageView input_ids({1, prefix_length},
                             std::vector<int32_t>(start_tokens.begin(),
                                                  start_tokens.begin() + prefix_length),
@@ -1042,7 +1130,8 @@ namespace ctranslate2 {
               input_ids,
               state,
               /*logits=*/nullptr,
-              options.return_attention ? &attention : nullptr);
+              options.return_attention ? &attention : nullptr,
+              options.return_attention ? &full_attention : nullptr);
 
       for (size_t i = 0; i < options.num_hypotheses; ++i) {
         result.hypotheses[i] = std::vector<size_t>(start_tokens.begin() + 1, start_tokens.end());
@@ -1050,9 +1139,33 @@ namespace ctranslate2 {
         if (options.return_attention) {
           if (attention.device() != Device::CPU)
             attention = attention.to_float().to(Device::CPU);
+          if (full_attention.device() != Device::CPU)
+            full_attention = full_attention.to_float().to(Device::CPU);
           for (dim_t t = 0; t < prefix_length; ++t) {
             const float* vector = attention.index<float>({0, t, 0});
             result.attention[i].emplace_back(vector, vector + attention.dim(-1));
+
+            const float* full_vector = full_attention.index<float>({0, t, 0, 0, 0});
+            const int dim1 = full_attention.dim(-3);
+            const int dim2 = full_attention.dim(-2);
+            const int dim3 = full_attention.dim(-1);
+            std::vector<float> attn_vec(full_vector, full_vector + (dim1 * dim2 * dim3));
+            std::vector<std::vector<std::vector<float>>> new_element;
+            new_element.reserve(dim1);
+            for (int j = 0; j < dim1; ++j) {
+              std::vector<std::vector<float>> new_row;
+              new_row.reserve(dim2);
+              for (int k = 0; k < dim2; ++k) {
+                std::vector<float> new_col;
+                new_col.reserve(dim3);
+                for (int l = 0; l < dim3; ++l) {
+                  new_col.emplace_back(attn_vec[j*dim2*dim3 + k*dim3 + l]);
+                }
+                new_row.emplace_back(std::move(new_col));
+              }
+              new_element.emplace_back(std::move(new_row));
+            }
+            result.full_attention[i].emplace_back(std::move(new_element));
           }
         }
       }
@@ -1093,8 +1206,10 @@ namespace ctranslate2 {
 
       // Add expanded word to the result.
       result.hypotheses[i].emplace_back(expansion_result.hypotheses[i].back());
-      if (options.return_attention)
+      if (options.return_attention){
         result.attention[i].emplace_back(std::move(expansion_result.attention[i].back()));
+        result.full_attention[i].emplace_back(std::move(expansion_result.full_attention[i].back()));
+      }
       if (options.return_scores){
         result.scores[i] = expansion_result.scores[i];
         result.token_scores[i].emplace_back(expansion_result.token_scores[i].back());
@@ -1124,8 +1239,10 @@ namespace ctranslate2 {
         result.scores.resize(num_alternatives);
         result.token_scores.resize(num_alternatives);
       }
-      if (options.return_attention)
+      if (options.return_attention){
         result.attention.resize(num_alternatives);
+        result.full_attention.resize(num_alternatives);
+      }
     }
 
     start_step += 1;
@@ -1161,10 +1278,14 @@ namespace ctranslate2 {
                                   std::make_move_iterator(suffix.token_scores[0].end()));
       }
 
-      if (options.return_attention)
+      if (options.return_attention){
         result.attention[i].insert(result.attention[i].end(),
                                    std::make_move_iterator(suffix.attention[0].begin()),
                                    std::make_move_iterator(suffix.attention[0].end()));
+        result.full_attention[i].insert(result.full_attention[i].end(),
+                                   std::make_move_iterator(suffix.full_attention[0].begin()),
+                                   std::make_move_iterator(suffix.full_attention[0].end()));
+      }
 
       result.hypotheses[i].insert(result.hypotheses[i].end(),
                                   std::make_move_iterator(suffix.hypotheses[0].begin()),

@@ -290,8 +290,9 @@ namespace ctranslate2 {
                                         const StorageView& ids,
                                         DecoderState& state,
                                         StorageView* logits,
-                                        StorageView* attention) {
-      return decode(ids, nullptr, step, state, logits, attention);
+                                        StorageView* attention,
+                                        StorageView* full_attention) {
+      return decode(ids, nullptr, step, state, logits, attention, full_attention);
     }
 
     void TransformerDecoder::operator()(const StorageView& ids,
@@ -302,26 +303,17 @@ namespace ctranslate2 {
     }
 
     static void append_attention_layer(StorageView& layers,
-                                       StorageView& layer) {
+                                        StorageView& layer) {
+      StorageView new_layer;
+      new_layer.copy_from(layer);
     
-    StorageView new_layer;
-    std::cout << "create new layer" << std::endl;
-    const dim_t num_heads = layer.dim(1);
-    std::cout << "num_heads" << num_heads << std::endl;
-    new_layer.copy_from(layer);
-    std::cout << "copy from" << std::endl;
-    new_layer.expand_dims(1);  // Insert new dimension for the layers.
-    std::cout << "expand dimension" << std::endl;
-
-    if (layers) {
-      const StorageView cur_layers(std::move(layers));
-      std::cout << "create cur_layers" << std::endl;
-      ops::Concat(1)({&cur_layers, &new_layer}, layers);
-      std::cout << "concat layers" << std::endl;
-    } else {
-      layers = std::move(new_layer);
-      std::cout << "just move new_layer since layers doesn't exist" << std::endl;
-    }
+      if (layers) {
+        //concatnate along the 2 axis [batches, heads, layers, frames] i.e. layers 
+        const StorageView cur_layers(std::move(layers));
+        ops::Concat(2)({&cur_layers, &new_layer}, layers);
+      } else {
+        layers = std::move(new_layer);
+      }
   }
 
     void TransformerDecoder::decode(const StorageView& ids,
@@ -330,6 +322,7 @@ namespace ctranslate2 {
                                     DecoderState& state,
                                     StorageView* outputs,
                                     StorageView* attention,
+                                    StorageView* full_attention,
                                     bool return_logits) {
       PROFILE("TransformerDecoder");
       const Device device = ids.device();
@@ -434,13 +427,11 @@ namespace ctranslate2 {
                       cached_attn_keys,
                       cached_attn_values,
                       layer_out,
-                      attention,
+                      full_attention ? attention : (l == size_t(_alignment_layer) ? attention : nullptr),
                       input_padder.get(),
                       memory_padder.get());
         layer_in = std::move(layer_out);
-        //l == size_t(_alignment_layer) ? attention : nullptr,
-        if(attention){
-          std::cout << "layer " << l << std::endl;
+        if(attention && full_attention){
           append_attention_layer(attention_layers, *attention);
         }
       }
@@ -451,11 +442,12 @@ namespace ctranslate2 {
       }
 
       if (attention) {
-        std::cout << "attention_layers " << attention_layers.shape() << std::endl;
-        std::cout << "attention_layer " << attention->shape() << std::endl;
         *attention = reduce_multi_head_attention(*attention, _alignment_heads);
         if (!is_sequence)
           attention->squeeze(1);
+      }
+      if(attention_layers && full_attention){
+        *full_attention = std::move(attention_layers);
       }
 
       if (outputs) {

@@ -252,6 +252,8 @@ namespace ctranslate2 {
         start_step = inputs.dim(1);
       }
 
+      const dim_t total_max_length = options.max_length;
+
       DecodingOptions decoding_options;
       decoding_options.start_step = start_step;
       decoding_options.beam_size = options.beam_size;
@@ -259,13 +261,13 @@ namespace ctranslate2 {
       decoding_options.length_penalty = options.length_penalty;
       decoding_options.repetition_penalty = options.repetition_penalty;
       decoding_options.no_repeat_ngram_size = options.no_repeat_ngram_size;
-      decoding_options.max_length = options.max_length / 2;
+      decoding_options.max_length = std::min(total_max_length / 2, total_max_length - start_step);
       decoding_options.sampling_topk = options.sampling_topk;
       decoding_options.sampling_temperature = options.sampling_temperature;
       decoding_options.num_hypotheses = options.num_hypotheses;
       decoding_options.return_scores = options.return_scores;
       decoding_options.return_attention = options.return_attention;
-      decoding_options.include_eos_in_scores = options.beam_size > 1;
+      decoding_options.include_eos_in_scores = true;
       decoding_options.include_eos_in_hypotheses = false;
       for (const auto& id : _model->config["suppress_ids"])
         decoding_options.disable_ids.push_back(id);
@@ -303,6 +305,7 @@ namespace ctranslate2 {
       std::vector<WhisperGenerationResult> final_results;
       final_results.reserve(results.size());
 
+
       for (size_t i = 0; i < results.size(); ++i) {
         auto& result = results[i];
 
@@ -312,6 +315,7 @@ namespace ctranslate2 {
         final_result.scores = std::move(result.scores);
         final_result.token_scores = std::move(result.token_scores[0]);
         final_result.attention = std::move(result.attention);
+        final_result.full_attention = std::move(result.full_attention);
         if (options.return_no_speech_prob)
           final_result.no_speech_prob = no_speech_probs[i];
 

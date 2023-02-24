@@ -56,6 +56,7 @@ namespace ctranslate2 {
       std::vector<float> token_scores;
       float no_speech_prob = 0;
       std::vector<std::vector<std::vector<float>>> attention;
+      std::vector<std::vector<std::vector<std::vector<std::vector<float>>>>> full_attention;
 
       size_t num_sequences() const {
         return sequences.size();
@@ -71,6 +72,10 @@ namespace ctranslate2 {
 
       bool has_attention() const {
         return !attention.empty();
+      }
+
+      bool has_full_attention() const {
+        return !full_attention.empty();
       }
     };
 

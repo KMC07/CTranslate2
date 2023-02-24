@@ -86,6 +86,8 @@ namespace ctranslate2 {
                       "Probability of the no speech token (0 if :obj:`return_no_speech_prob` was disabled).")
         .def_readonly("attention", &models::WhisperGenerationResult::attention,
                       "The attention alignment of the model (empty if :obj:`return_attention` was disabled).")
+        .def_readonly("full_attention", &models::WhisperGenerationResult::full_attention,
+                      "The full attention alignment of the model (empty if :obj:`return_attention` was disabled).")
 
         .def("__repr__", [](const models::WhisperGenerationResult& result) {
           return "WhisperGenerationResult(sequences=" + std::string(py::repr(py::cast(result.sequences)))
@@ -94,6 +96,7 @@ namespace ctranslate2 {
             + ", token_scores=" + std::string(py::repr(py::cast(result.token_scores)))
             + ", no_speech_prob=" + std::string(py::repr(py::cast(result.no_speech_prob)))
             + ", attention=" + std::string(py::repr(py::cast(result.attention)))
+            + ", full_attention=" + std::string(py::repr(py::cast(result.full_attention)))
             + ")";
         })
         ;

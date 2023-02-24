@@ -215,6 +215,17 @@ namespace ctranslate2 {
                                                                     output.size()));
       }
 
+      StorageView qk(values.dtype(), values.device());
+      qk.copy_from(output);
+      if (attention) {
+        if (beam_size == 1)
+          *attention = std::move(qk);
+        else {
+          transpose_op(qk, *attention);
+          attention->reshape({-1, qk.dim(1), 1, qk.dim(-1)});
+        }
+      }
+
       StorageView attn(values.dtype(), values.device());
       ops::SoftMax()(output, values_lengths, attn);
 
@@ -226,15 +237,6 @@ namespace ctranslate2 {
                                      *relative_position_values,
                                      values_matmul,
                                      output);
-
-      if (attention) {
-        if (beam_size == 1)
-          *attention = std::move(attn);
-        else {
-          transpose_op(attn, *attention);
-          attention->reshape({-1, attn.dim(1), 1, attn.dim(-1)});
-        }
-      }
     }
 
     static void split_heads(StorageView& x,
