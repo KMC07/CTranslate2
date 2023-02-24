@@ -8,6 +8,10 @@
 
 #include "dispatch.h"
 
+#ifdef CT2_WITH_CUDA
+#  include "cuda/utils.h"
+#endif
+
 namespace ctranslate2 {
   namespace models {
 
@@ -103,7 +107,7 @@ namespace ctranslate2 {
       StorageView no_speech_probs(dtype, device);
       ops::Gather(/*axis=*/1, /*batch_dims=*/1)(probs, gather_ids, no_speech_probs);
 
-      if (no_speech_probs.dtype() != DataType::FLOAT)
+      if (no_speech_probs.dtype() != DataType::FLOAT32)
         no_speech_probs = no_speech_probs.to_float();
       return no_speech_probs.to_vector<float>();
     }
@@ -201,6 +205,10 @@ namespace ctranslate2 {
       PROFILE("WhisperReplica::generate");
       if (prompts.empty())
         return {};
+
+#ifdef CT2_WITH_CUDA
+      const cuda::UseTrueFp16GemmInScope use_true_fp16_gemm(false);
+#endif
 
       size_t sot_index = 0;
       size_t prompt_length = 0;  // Length of the prompt before the text tokens.
@@ -332,6 +340,10 @@ namespace ctranslate2 {
 
       PROFILE("WhisperReplica::detect_language");
 
+#ifdef CT2_WITH_CUDA
+      const cuda::UseTrueFp16GemmInScope use_true_fp16_gemm(false);
+#endif
+
       const auto scoped_device_setter = _model->get_scoped_device_setter();
       const auto& vocabulary = _model->get_vocabulary();
       const auto device = _model->device();
@@ -362,7 +374,7 @@ namespace ctranslate2 {
       ops::Gather(/*axis=*/-1, /*batch_dims=*/1)(logits, score_ids, lang_probs);
       ops::SoftMax()(lang_probs);
 
-      if (lang_probs.dtype() != DataType::FLOAT)
+      if (lang_probs.dtype() != DataType::FLOAT32)
         lang_probs = lang_probs.to_float();
       if (lang_probs.device() != Device::CPU)
         lang_probs = lang_probs.to(Device::CPU);
@@ -528,7 +540,7 @@ namespace ctranslate2 {
             if (log_probs.device() == Device::CPU)
               sample_timestamp = should_sample_timestamp<Device::CPU, float>(log_probs, batch_id);
 #ifdef CT2_WITH_CUDA
-            else if (log_probs.dtype() == DataType::FLOAT)
+            else if (log_probs.dtype() == DataType::FLOAT32)
               sample_timestamp = should_sample_timestamp<Device::CUDA, float>(log_probs, batch_id);
             else
               sample_timestamp = should_sample_timestamp<Device::CUDA, float16_t>(log_probs, batch_id);

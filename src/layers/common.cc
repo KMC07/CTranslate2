@@ -276,8 +276,8 @@ namespace ctranslate2 {
                                ? &model.get_variable(scope + "/weight_compensation")
                                : nullptr)
       , _partial_weight(_weight.device(), _weight.dtype())
-      , _partial_bias(_weight.device(), _bias ? _bias->dtype() : DataType::FLOAT)
-      , _partial_qscale(_weight.device(), DataType::FLOAT)
+      , _partial_bias(_weight.device(), _bias ? _bias->dtype() : DataType::FLOAT32)
+      , _partial_qscale(_weight.device(), DataType::FLOAT32)
       , _partial_u8_shift_compensation(_weight.device(), DataType::INT32)
       , _output_type(get_default_float_type(model.effective_compute_type()))
       , _quantized_gemm(_weight.dtype() == DataType::INT16 || _weight.dtype() == DataType::INT8)
@@ -288,7 +288,9 @@ namespace ctranslate2 {
                  /*a_is_packed=*/false,
                  _packed_weight,
                  _quantized_gemm ? nullptr : activation_type)
-      , _quantize_op(/*int16_scale_type=*/ops::Quantize::ScaleType::GLOBAL,
+      , _quantize_op(model.use_global_int16_scale()
+                     ? ops::Quantize::ScaleType::GLOBAL
+                     : ops::Quantize::ScaleType::PER_LAYER,
                      /*shift_to_uint8=*/bool(_u8_shift_compensation),
                      /*round_before_cast=*/model.round_before_cast_in_quantization())
       , _dequantize_op(activation_type)
