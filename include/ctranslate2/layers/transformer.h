@@ -155,8 +155,7 @@ namespace ctranslate2 {
                       const StorageView& ids,
                       DecoderState& state,
                       StorageView* logits = nullptr,
-                      StorageView* attention = nullptr,
-                      StorageView* full_attention = nullptr) override;
+                      StorageView* attention = nullptr) override;
       void operator()(const StorageView& ids,
                       const StorageView& lengths,
                       DecoderState& state,
@@ -173,7 +172,6 @@ namespace ctranslate2 {
                   DecoderState& state,
                   StorageView* outputs = nullptr,
                   StorageView* attention = nullptr,
-                  StorageView* full_attention = nullptr,
                   bool return_logits = true);
 
       const dim_t _num_heads;

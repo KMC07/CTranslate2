@@ -1,7 +1,11 @@
 #include "ctranslate2/models/whisper.h"
 
 #include <algorithm>
+#include <cstring>
 #include <iostream>
+#include <map>
+#include <string>
+#include <vector>
 
 #include "ctranslate2/decoding.h"
 #include "ctranslate2/models/model_factory.h"
@@ -32,7 +36,18 @@ namespace ctranslate2 {
       vocab_info.eos_token = "<|endoftext|>";
       _vocabulary = std::make_shared<Vocabulary>(*model_reader.get_required_file("vocabulary.txt"),
                                                  std::move(vocab_info));
+
+      // define alignment heads as a map from model name to byte string
+      // std::map<int, const char*> alignment_heads = {
+      //     {4, "ABzY8bu8Lr0{>%RKn9Fp%m@SkK7Kt=7ytkO"},
+      //     {6, "ABzY8KQ!870{>%RzyTQH3`Q^yNP!>##QT-<FaQ7m"},
+      //     {12, "ABzY8DmU6=0{>%Rpa?J`kvJ6qF(V^F86#Xh7JUGMK}P<N0000"},
+      //     {24, "ABzY8B0Jh+0{>%R7}kK1fFL7w6%<-Pf*t^=N)Qr&0RR9"},
+      //     {32, "ABzY8zd+h!0{>%R7=D0pU<_bnWW*tkYAhobTNnu$jnkEkXqp)j;w1Tzk)UH3X%SZd&fFZ2fC2yj"}
+      // };
     }
+
+    
 
     bool WhisperModel::is_quantizable(const std::string& variable_name) const {
       return (Model::is_quantizable(variable_name)
@@ -323,7 +338,6 @@ namespace ctranslate2 {
         final_result.scores = std::move(result.scores);
         final_result.token_scores = std::move(result.token_scores[0]);
         final_result.attention = std::move(result.attention);
-        final_result.full_attention = std::move(result.full_attention);
         if (options.return_no_speech_prob)
           final_result.no_speech_prob = no_speech_probs[i];
 

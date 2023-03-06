@@ -1,6 +1,8 @@
 #include "module.h"
 
+#include <iostream>
 #include <ctranslate2/models/whisper.h>
+#include <pybind11/numpy.h>
 
 #include "storage_view.h"
 #include "replica_pool.h"
@@ -69,37 +71,55 @@ namespace ctranslate2 {
       }
     };
 
-
     void register_whisper(py::module& m) {
-      py::class_<models::WhisperGenerationResult>(m, "WhisperGenerationResult",
-                                                  "A generation result from the Whisper model.")
+      py::class_<models::WhisperGenerationResult>(m, "WhisperGenerationResult")
 
-        .def_readonly("sequences", &models::WhisperGenerationResult::sequences,
-                      "Generated sequences of tokens.")
-        .def_readonly("sequences_ids", &models::WhisperGenerationResult::sequences_ids,
-                      "Generated sequences of token IDs.")
-        .def_readonly("scores", &models::WhisperGenerationResult::scores,
-                      "Score of each sequence (empty if :obj:`return_scores` was disabled).")
-        .def_readonly("token_scores", &models::WhisperGenerationResult::token_scores,
-                      "Score of each token in a sequence (empty if :obj:`return_scores` was disabled).")
-        .def_readonly("no_speech_prob", &models::WhisperGenerationResult::no_speech_prob,
-                      "Probability of the no speech token (0 if :obj:`return_no_speech_prob` was disabled).")
-        .def_readonly("attention", &models::WhisperGenerationResult::attention,
-                      "The attention alignment of the model (empty if :obj:`return_attention` was disabled).")
-        .def_readonly("full_attention", &models::WhisperGenerationResult::full_attention,
-                      "The full attention alignment of the model (empty if :obj:`return_attention` was disabled).")
+        .def_property_readonly("sequences", [](const models::WhisperGenerationResult &result) {
+          return py::cast(result.sequences);
+        }, "Generated sequences of tokens.")
 
-        .def("__repr__", [](const models::WhisperGenerationResult& result) {
-          return "WhisperGenerationResult(sequences=" + std::string(py::repr(py::cast(result.sequences)))
-            + ", sequences_ids=" + std::string(py::repr(py::cast(result.sequences_ids)))
-            + ", scores=" + std::string(py::repr(py::cast(result.scores)))
-            + ", token_scores=" + std::string(py::repr(py::cast(result.token_scores)))
-            + ", no_speech_prob=" + std::string(py::repr(py::cast(result.no_speech_prob)))
-            + ", attention=" + std::string(py::repr(py::cast(result.attention)))
-            + ", full_attention=" + std::string(py::repr(py::cast(result.full_attention)))
-            + ")";
-        })
-        ;
+        .def_property_readonly("sequences_ids", [](const models::WhisperGenerationResult &result) {
+          return py::cast(result.sequences_ids);
+        }, "Generated sequences of token IDs.")
+
+        .def_property_readonly("scores", [](const models::WhisperGenerationResult &result) {
+          return py::cast(result.scores);
+        }, "Score of each sequence (empty if :obj:`return_scores` was disabled).")
+
+        .def_property_readonly("token_scores", [](const models::WhisperGenerationResult& result) {
+          return py::cast(result.token_scores);
+        }, "Score of each token in a sequence (empty if :obj:`return_scores` was disabled).")
+
+        .def_property_readonly("attention", [](const models::WhisperGenerationResult& result) {
+            // Convert std::vector<std::vector<std::vector<std::vector<float>>>> to a 3D numpy array
+            auto dim1 = result.attention[0].size();
+            auto dim2 = result.attention[0][0].size();
+
+            // Create a 1D vector by concatenating the innermost vectors
+            std::vector<float> flattened(dim1 * dim2);
+            auto it = flattened.begin();
+            for (const auto& v1 : result.attention[0]) {
+                it = std::copy(v1.begin(), v1.end(), it);
+            }
+            // Create a 5D NumPy array with the same shape as the vector
+            return py::array_t<float>({dim1, dim2}, flattened.data());
+
+          }, "The full attention alignment of the model (empty if :obj:return_attention was disabled).")
+
+        .def_property_readonly("no_speech_prob", [](const models::WhisperGenerationResult &result) {
+          return py::cast(result.no_speech_prob);
+        }, "Probability of the no speech token (0 if :obj:`return_no_speech_prob` was disabled).");
+
+        // .def("__repr__", [](const models::WhisperGenerationResult& result) {
+        //   return "WhisperGenerationResult(sequences=" + std::string(py::repr(py::cast(result.sequences)))
+        //     + ", sequences_ids=" + std::string(py::repr(py::cast(result.sequences_ids)))
+        //     + ", scores=" + std::string(py::repr(py::cast(result.scores)))
+        //     + ", token_scores=" + std::string(py::repr(py::cast(result.token_scores)))
+        //     + ", no_speech_prob=" + std::string(py::repr(py::cast(result.no_speech_prob)))
+        //     + ", attention=" + std::string(py::repr(py::cast(result.attention)))
+        //     + ")";
+        // })
+        // ;
 
       declare_async_wrapper<models::WhisperGenerationResult>(m, "WhisperGenerationResultAsync");
 

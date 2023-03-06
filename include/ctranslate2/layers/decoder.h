@@ -25,8 +25,7 @@ namespace ctranslate2 {
                               const StorageView& ids,
                               DecoderState& state,
                               StorageView* logits = nullptr,
-                              StorageView* attention = nullptr,
-                              StorageView* full_attention = nullptr) = 0;
+                              StorageView* attention = nullptr) = 0;
 
       // Forwards a full sequence.
       virtual void operator()(const StorageView& ids,

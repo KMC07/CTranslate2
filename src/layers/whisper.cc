@@ -72,7 +72,6 @@ namespace ctranslate2 {
              state,
              outputs,
              /*attention=*/nullptr,
-             /*full_attention=*/nullptr,
              /*return_logits=*/false);
     }
 

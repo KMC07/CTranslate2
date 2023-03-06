@@ -13,7 +13,6 @@ namespace ctranslate2 {
     std::vector<float> scores;
     std::vector<std::vector<float>> token_scores;
     std::vector<std::vector<std::vector<float>>> attention;
-    std::vector<std::vector<std::vector<std::vector<std::vector<float>>>>> full_attention;
   };
 
 

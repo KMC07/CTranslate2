@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 
 #include "dispatch.h"
 
@@ -110,9 +111,9 @@ namespace ctranslate2 {
 
       StorageView reduced_attention(dtype, device);
 
-      if (num_heads_to_average == num_heads)
+      if (num_heads_to_average == num_heads){
         ops::Mean(1)(attention, reduced_attention);
-      else {
+      }else {
         StorageView heads_to_average(dtype, device);
         StorageView heads_to_ignore(dtype, device);
         const std::vector<dim_t> split_size{num_heads_to_average, num_heads - num_heads_to_average};

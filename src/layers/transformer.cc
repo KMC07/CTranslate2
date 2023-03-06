@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <vector>
 
 namespace ctranslate2 {
   namespace layers {
@@ -290,9 +291,8 @@ namespace ctranslate2 {
                                         const StorageView& ids,
                                         DecoderState& state,
                                         StorageView* logits,
-                                        StorageView* attention,
-                                        StorageView* full_attention) {
-      return decode(ids, nullptr, step, state, logits, attention, full_attention);
+                                        StorageView* attention) {
+      return decode(ids, nullptr, step, state, logits, attention);
     }
 
     void TransformerDecoder::operator()(const StorageView& ids,
@@ -304,9 +304,10 @@ namespace ctranslate2 {
 
     static void append_attention_layer(StorageView& layers,
                                         StorageView& layer) {
+
       StorageView new_layer;
       new_layer.copy_from(layer);
-    
+
       if (layers) {
         //concatnate along the 2 axis [batches, heads, layers, frames] i.e. layers 
         const StorageView cur_layers(std::move(layers));
@@ -314,7 +315,7 @@ namespace ctranslate2 {
       } else {
         layers = std::move(new_layer);
       }
-  }
+    }
 
     void TransformerDecoder::decode(const StorageView& ids,
                                     const StorageView* lengths,
@@ -322,7 +323,6 @@ namespace ctranslate2 {
                                     DecoderState& state,
                                     StorageView* outputs,
                                     StorageView* attention,
-                                    StorageView* full_attention,
                                     bool return_logits) {
       PROFILE("TransformerDecoder");
       const Device device = ids.device();
@@ -401,6 +401,8 @@ namespace ctranslate2 {
         }
       }
 
+
+      //set up the attention layers
       StorageView attention_layers;
       for (size_t l = 0; l < _layers.size(); ++l) {
         StorageView* cached_self_attn_keys = nullptr;
@@ -427,11 +429,12 @@ namespace ctranslate2 {
                       cached_attn_keys,
                       cached_attn_values,
                       layer_out,
-                      full_attention ? attention : (l == size_t(_alignment_layer) ? attention : nullptr),
+                      l >= (_layers.size() - 6) ? attention : nullptr,
                       input_padder.get(),
                       memory_padder.get());
         layer_in = std::move(layer_out);
-        if(attention && full_attention){
+
+        if(attention && l >= (_layers.size() - 6)){
           append_attention_layer(attention_layers, *attention);
         }
       }
@@ -441,13 +444,14 @@ namespace ctranslate2 {
         state.erase("memory");
       }
 
-      if (attention) {
-        *attention = reduce_multi_head_attention(*attention, _alignment_heads);
-        if (!is_sequence)
-          attention->squeeze(1);
-      }
-      if(attention_layers && full_attention){
-        *full_attention = std::move(attention_layers);
+      // if (attention_layers && attention) {
+      //   *attention = reduce_multi_head_attention(attention_layers, _alignment_heads);
+      //   if (!is_sequence)
+      //     attention->squeeze(1);
+      // }
+      if(attention_layers && attention){
+        dim_t reduced_alignment_heads = attention_layers.dim(1) * attention_layers.dim(2);
+        *attention = reduce_multi_head_attention(attention_layers.reshape({attention_layers.dim(0), reduced_alignment_heads, attention_layers.dim(3)}), reduced_alignment_heads);
       }
 
       if (outputs) {
