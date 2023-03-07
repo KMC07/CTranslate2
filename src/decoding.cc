@@ -371,7 +371,6 @@ namespace ctranslate2 {
                      const bool return_scores,
                      const bool return_attention,
                      const size_t num_hypotheses,
-                     const bool include_eos_in_scores,
                      const bool include_eos_in_hypotheses,
                      const std::vector<std::shared_ptr<LogitsProcessor>>& logits_processors,
                      const std::vector<std::vector<size_t>>* prefix_ids) const {
@@ -475,18 +474,12 @@ namespace ctranslate2 {
       }
 
       // Multiply by the current beam log probs.
-      StorageView topk_scores_prev(dtype);
       if (topk_scores) {
         DEVICE_AND_TYPE_DISPATCH(log_probs.device(), log_probs.dtype(),
                                  primitives<D>::add_depth_broadcast(topk_scores.to(device).data<T>(),
                                                                     log_probs.data<T>(),
                                                                     topk_scores.size(),
                                                                     log_probs.size()));
-
-        if (!include_eos_in_scores) {
-          topk_scores_prev = topk_scores;
-          topk_scores_prev.reshape({cur_batch_size, _beam_size});
-        }
       }
 
       // Flatten the probs into a list of candidates.
@@ -541,7 +534,7 @@ namespace ctranslate2 {
         if (!is_expanded)
           repeat_batch(attention_step, _beam_size);
         split_batch_beam(attention_step, _beam_size);
-        append_step_output(alive_attention, attention_step.to_float().to(Device::CPU));
+        append_step_output(alive_attention, attention_step.to_float32().to(Device::CPU));
         gather_beam_flat(alive_attention, gather_indices, num_candidates);
       }
 
@@ -566,16 +559,10 @@ namespace ctranslate2 {
             if (k == 0)
               top_beam_finished[i] = true;
 
-            bool ignore_last_score = false;
-            bool ignore_last_token = false;
-            if (last_id == end_id) {
-              ignore_last_score = !include_eos_in_scores;
-              ignore_last_token = !include_eos_in_hypotheses;
-            }
+            const bool ignore_last_token = last_id == end_id && !include_eos_in_hypotheses;
 
             // Register this hypothesis.
-            const StorageView& scores = ignore_last_score ? topk_scores_prev : topk_scores;
-            result.scores.emplace_back(scores.scalar_at<float>({i, k}));
+            result.scores.emplace_back(topk_scores.scalar_at<float>({i, k}));
             // add the token scores
             result.token_scores.emplace_back(build_topk_scores(alive_seq_scores, i, k, ignore_last_token));
             result.hypotheses.emplace_back(build_hypothesis(alive_seq, i, k, ignore_last_token));
@@ -690,7 +677,6 @@ namespace ctranslate2 {
                        const bool return_scores,
                        const bool return_attention,
                        const size_t num_hypotheses,
-                       const bool include_eos_in_scores,
                        const bool include_eos_in_hypotheses,
                        const std::vector<std::shared_ptr<LogitsProcessor>>& logits_processors,
                        const std::vector<std::vector<size_t>>* prefix_ids) const {
@@ -720,7 +706,6 @@ namespace ctranslate2 {
                                                    /*return_scores=*/true,
                                                    return_attention,
                                                    /*num_hypotheses=*/1,
-                                                   include_eos_in_scores,
                                                    include_eos_in_hypotheses,
                                                    logits_processors,
                                                    prefix_ids ? &repeat_prefix_ids : nullptr);
@@ -803,7 +788,7 @@ namespace ctranslate2 {
       if (prefix_ids)
         update_sample_with_prefix(step, best_ids, best_probs, *prefix_ids, end_id, batch_offset);
       if (attention_step_device)
-        attention_step.copy_from(attention_step_device.to_float());
+        attention_step.copy_from(attention_step_device.to_float32());
 
       if (!logits_processors.empty()) {
         if (alive_seq) {
@@ -841,11 +826,9 @@ namespace ctranslate2 {
           }
         }
 
-        if (word_id != end_id || include_eos_in_scores) {
-          if (return_scores){
-            results[batch_id].scores[0] += best_probs.scalar_at<float>({i, 0});
-            results[batch_id].token_scores[0].push_back(best_probs.scalar_at<float>({i, 0}));
-          }
+        if (return_scores){
+          results[batch_id].scores[0] += best_probs.scalar_at<float>({i, 0});
+          results[batch_id].token_scores[0].push_back(best_probs.scalar_at<float>({i, 0}));
         }
 
         const bool is_finished = ((word_id == end_id && step >= prefix_length)
@@ -1062,7 +1045,7 @@ namespace ctranslate2 {
 
         if (options.return_attention) {
           if (attention.device() != Device::CPU)
-            attention = attention.to_float().to(Device::CPU);
+            attention = attention.to_float32().to(Device::CPU);
           for (dim_t t = 0; t < prefix_length; ++t) {
             const float* vector = attention.index<float>({0, t, 0});
             result.attention[i].emplace_back(vector, vector + attention.dim(-1));
@@ -1103,7 +1086,6 @@ namespace ctranslate2 {
                                                   /*return_scores=*/true,
                                                   options.return_attention,
                                                   options.num_hypotheses,
-                                                  options.include_eos_in_scores,
                                                   options.include_eos_in_hypotheses,
                                                   logits_processors)[0];
 
@@ -1171,7 +1153,6 @@ namespace ctranslate2 {
                                                   options.return_scores,
                                                   options.return_attention,
                                                   /*num_hypotheses=*/1,
-                                                  options.include_eos_in_scores,
                                                   options.include_eos_in_hypotheses,
                                                   logits_processors);
 
@@ -1267,7 +1248,6 @@ namespace ctranslate2 {
                                         options.return_scores,
                                         options.return_attention,
                                         options.num_hypotheses,
-                                        options.include_eos_in_scores,
                                         options.include_eos_in_hypotheses,
                                         logits_processors,
                                         prefix_ids.empty() ? nullptr : &prefix_ids);

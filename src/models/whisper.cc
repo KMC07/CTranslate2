@@ -123,7 +123,7 @@ namespace ctranslate2 {
       ops::Gather(/*axis=*/1, /*batch_dims=*/1)(probs, gather_ids, no_speech_probs);
 
       if (no_speech_probs.dtype() != DataType::FLOAT32)
-        no_speech_probs = no_speech_probs.to_float();
+        no_speech_probs = no_speech_probs.to_float32();
       return no_speech_probs.to_vector<float>();
     }
 
@@ -290,12 +290,21 @@ namespace ctranslate2 {
       decoding_options.num_hypotheses = options.num_hypotheses;
       decoding_options.return_scores = options.return_scores;
       decoding_options.return_attention = options.return_attention;
-      decoding_options.include_eos_in_scores = true;
       decoding_options.include_eos_in_hypotheses = false;
-      for (const auto& id : _model->config["suppress_ids"])
-        decoding_options.disable_ids.push_back(id);
-      for (const auto& id : _model->config["suppress_ids_begin"])
-        decoding_options.disable_ids_begin.push_back(id);
+
+      for (const auto& id : options.suppress_tokens) {
+        if (id >= 0)
+          decoding_options.disable_ids.push_back(id);
+        else if (id == -1) {
+          for (const auto& default_id : _model->config["suppress_ids"])
+            decoding_options.disable_ids.push_back(default_id);
+        }
+      }
+
+      if (options.suppress_blank) {
+        for (const auto& id : _model->config["suppress_ids_begin"])
+          decoding_options.disable_ids_begin.push_back(id);
+      }
 
       std::shared_ptr<GetNoSpeechProbs> no_speech_probs_processor;
       if (options.return_no_speech_prob && sot_is_start_token) {
@@ -307,7 +316,7 @@ namespace ctranslate2 {
       if (prompts[0][prompt_length - 1] != _no_timestamps_id) {
         const size_t timestamp_begin_id = _no_timestamps_id + 1;
         const size_t timestamp_end_id = vocabulary.size() - 1;
-        const size_t max_initial_timestamp_id = timestamp_begin_id + 50;
+        const size_t max_initial_timestamp_id = timestamp_begin_id + options.max_initial_timestamp_index;
         decoding_options.logits_processors.emplace_back(
           std::make_shared<ApplyTimestampRules>(_eot_id,
                                                 _no_timestamps_id,
@@ -389,7 +398,7 @@ namespace ctranslate2 {
       ops::SoftMax()(lang_probs);
 
       if (lang_probs.dtype() != DataType::FLOAT32)
-        lang_probs = lang_probs.to_float();
+        lang_probs = lang_probs.to_float32();
       if (lang_probs.device() != Device::CPU)
         lang_probs = lang_probs.to(Device::CPU);
 
